@@ -100,7 +100,3 @@ echo "Extracting spec file '$spec_file'" >&2
 rpm2cpio $full_srcpkg | cpio -i $spec_file 2>/dev/null
 
 echo "Done" >&2
-
-# select src in httpd-29 httpd-28; do
-#     echo "Picked $src ($REPLY)"
-# done
