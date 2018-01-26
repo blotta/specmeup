@@ -1,0 +1,106 @@
+#!/bin/bash
+
+# Grabs the spec file used to build a specific RPM package
+
+# Steps
+# dnf repoquery --source <package> 2>/dev/null # gets the source package name(s)
+#                                                Only needed to select version
+# dnf download <package> --source  # Downloads source package on current directory
+# rpm -ql -p <src package> | grep '*.spec' # gets the name of the spec file
+# rpm2cpio <src package> | cpio -i [--to-stdout] <spec file> # extracts spec file
+
+set -e
+
+function error_occ(){
+    local errn=${2:-1}
+    local errmsg=${1:-"Script failed"}
+    echo "Error $errn: $errmsg" 1>&2
+    exit $errn
+}
+
+function x_pkg_n_ver(){
+    # Given an pkg-v1.v2.v3-rel-fc2?.src.rpm, extract pkg-v
+    local p="$(echo $1 | perl -ne '/^(.*)-\d{1,3}\.fc2\d\.src\.rpm$/ && print $1')"
+    [ -z "$p" ] && error_occ 'Invalid package returned by dnf' 3
+    echo $p
+    return 0
+}
+
+function usage(){
+    cat <<EOU
+Usage: $(basename $0) <package>
+
+EOU
+}
+
+if [ $# -ne 1 ]; then
+    usage
+    exit 1
+elif [ "$1" == '-h' ] || [ "$1" == '--help' ]; then
+    usage
+    exit 0
+fi
+
+pkg_input="${1}"
+
+echo 'Querying repository' >&2
+sources=($(dnf -q repoquery --source "$pkg_input" 2>/dev/null))
+
+if [ ${#sources[@]} -le 0 ]; then
+    error_occ 'No source packages found when searching package '"'$pkg_input'" 2
+
+elif [ ${#sources[@]} -eq 1 ]; then
+    srcpkg="$( x_pkg_n_ver ${sources[0]} )"
+
+else
+    # More than one option
+    # user selection (or, if with flag, download latest)
+    echo 'More than one package found. Please select:' >&2
+    select opt in ${sources[*]} Cancel; do
+        if ! echo $REPLY | grep -P '^\d{1,3}$' &>/dev/null; then
+            continue
+        elif [ $REPLY -le ${#sources[@]} ] && [ $REPLY -gt 0 ]; then
+            srcpkg="$(x_pkg_n_ver $opt )"
+            break
+        elif [ $REPLY -eq $(( ${#sources[@]} + 1 )) ]; then
+            exit 0
+        else
+            continue
+        fi
+    done
+fi
+
+# Make temp directory to download src package in
+tmpSrcpkgDir=$(mktemp -d)
+
+function cleanup(){
+    if echo "$tmpSrcpkgDir" | grep -P '^\/tmp\/tmp\.[0-9a-zA-Z]+$' &>/dev/null && \
+        test -d $tmpSrcpkgDir
+    then
+        rm -rf $tmpSrcpkgDir
+    fi
+}
+
+trap cleanup EXIT
+
+# Download package
+echo "Downloading package '$srcpkg'"
+dnf download $srcpkg --source --destdir $tmpSrcpkgDir -q 2>/dev/null || \
+    error_occ "Error downloading package '$tmpSrcpkgDir'" 3
+
+# get full source rpm package name
+full_srcpkg="$(realpath $(ls --color=never $tmpSrcpkgDir/${srcpkg}*))"
+
+# findout .spec file full name
+spec_file=$(rpm -ql -p $full_srcpkg | egrep '^.*\.spec$' || \
+            error_occ "Coudn't find spec file in '$(basename full_srcpkg)'")
+
+# Extract .spec file to current directory
+echo "Extracting spec file '$spec_file'" >&2
+rpm2cpio $full_srcpkg | cpio -i $spec_file 2>/dev/null
+
+echo "Done" >&2
+
+# select src in httpd-29 httpd-28; do
+#     echo "Picked $src ($REPLY)"
+# done
