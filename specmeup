@@ -71,7 +71,11 @@ else
 fi
 
 # Make temp directory to download src package in
-tmpSrcpkgDir=$(mktemp -d)
+if [ "$1" == "--keep" ] || [ "$1" == '-k' ]; then
+    tmpSrcpkgDir="$(pwd)"
+else
+    tmpSrcpkgDir=$(mktemp -d)
+fi
 
 function cleanup(){
     if echo "$tmpSrcpkgDir" | grep -P '^\/tmp\/tmp\.[0-9a-zA-Z]+$' &>/dev/null && \
